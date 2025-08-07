@@ -22,7 +22,7 @@ PDF_DOWNLOAD_DIR = "downloaded_pdfs"
 FAISS_INDEX_DIR = "faiss_index"
 os.makedirs(PDF_DOWNLOAD_DIR, exist_ok=True)
 
-# Predefined PDFs per company, with all your provided links included:
+# --- PDF Links ---
 PREDEFINED_PDF_LINKS = {
     "Dell": [
         "https://i.dell.com/sites/csdocuments/Product_Docs/en/Dell-EMC-PowerEdge-Rack-Servers-Quick-Reference-Guide.pdf",
@@ -55,14 +55,12 @@ PREDEFINED_PDF_LINKS = {
         "https://www.commoncriteriaportal.org/files/epfiles/Fortinet%20FortiGate_EAL4_ST_V1.5.pdf",
     ],
     "EUC": [
-        # These are websites, so will be skipped gracefully in ingestion
         "https://www.dell.com/en-us/lp/dt/end-user-computing",
         "https://www.nutanix.com/solutions/end-user-computing",
         "https://eucscore.com/docs/tools.html",
         "https://apparity.com/euc-resources/spreadsheet-euc-documents/",
     ],
 }
-
 
 # --- Helper Functions ---
 
@@ -103,30 +101,11 @@ def get_llm():
         temperature=0
     )
 
-def initialize_vector_store(documents, embeddings):
-    if documents:
-        if 'vector_store' in st.session_state and st.session_state.vector_store is not None:
-            # Add new documents to existing store
-            st.session_state.vector_store.add_documents(documents)
-            st.info("Added new documents to existing FAISS index.")
-        else:
-            # Create a new FAISS vector store
-            st.session_state.vector_store = FAISS.from_documents(documents, embeddings)
-            st.info("Created new FAISS index.")
-        
-        # Save the updated or new FAISS index locally
-        st.session_state.vector_store.save_local(FAISS_INDEX_DIR)
-        st.success("Vector store updated and saved locally!")
-    else:
-        st.warning("No documents to add.")
-
-@st.cache_resource(experimental_allow_widgets=True)
 def get_rag_chain(vector_store, llm):
     if vector_store is None:
         st.error("Vector store not initialized.")
         return None
 
-    # This memory is created fresh for each Streamlit run, but the session_state messages will be used
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key='answer')
 
     return ConversationalRetrievalChain.from_llm(
@@ -135,6 +114,20 @@ def get_rag_chain(vector_store, llm):
         memory=memory,
         return_source_documents=True
     )
+
+def initialize_vector_store(documents, embeddings):
+    if documents:
+        if 'vector_store' in st.session_state and st.session_state.vector_store is not None:
+            st.session_state.vector_store.add_documents(documents)
+            st.info("Added new documents to existing FAISS index.")
+        else:
+            st.session_state.vector_store = FAISS.from_documents(documents, embeddings)
+            st.info("Created new FAISS index.")
+
+        st.session_state.vector_store.save_local(FAISS_INDEX_DIR)
+        st.success("Vector store updated and saved locally!")
+    else:
+        st.warning("No documents to add.")
 
 def display_pdf(file_path):
     try:
@@ -167,10 +160,11 @@ except Exception as e:
     st.error(f"Failed to initialize models. Error: {e}")
     st.stop()
 
-# Load existing FAISS index if it exists
+# Load existing FAISS index
 if os.path.exists(FAISS_INDEX_DIR):
     try:
-        st.session_state.vector_store = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
+        st.session_state.vector_store = FAISS.load_local(
+            FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
         st.success("Loaded existing FAISS index.")
     except Exception as e:
         st.warning(f"Could not load existing FAISS index. Starting fresh. Error: {e}")
@@ -178,7 +172,6 @@ if os.path.exists(FAISS_INDEX_DIR):
 # Sidebar
 with st.sidebar:
     st.header("Upload & Ingest")
-
     uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
     if uploaded_files and st.button("Process Uploaded PDFs"):
         all_new_docs = []
@@ -193,7 +186,7 @@ with st.sidebar:
         if all_new_docs:
             initialize_vector_store(all_new_docs, embeddings)
             st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
-            st.session_state.messages = [] # Reset chat history
+            st.session_state.messages = []
             st.experimental_rerun()
 
     st.subheader("Predefined PDF Ingestion")
@@ -215,10 +208,10 @@ with st.sidebar:
             if all_docs:
                 initialize_vector_store(all_docs, embeddings)
                 st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
-                st.session_state.messages = [] # Reset chat history
+                st.session_state.messages = []
                 st.experimental_rerun()
 
-# Re-initialize the RAG chain if the vector store is ready
+# Re-initialize RAG chain if needed
 if st.session_state.vector_store and not st.session_state.rag_chain:
     st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
 
@@ -247,13 +240,17 @@ with col2:
             else:
                 with st.spinner("Thinking..."):
                     try:
-                        # Prepare chat history for the chain
                         chat_history_formatted = [(m['role'], m['content']) for m in st.session_state.messages if m['role'] != 'assistant']
-                        response = st.session_state.rag_chain.invoke({"question": prompt, "chat_history": chat_history_formatted})
-                        
+                        response = st.session_state.rag_chain.invoke({
+                            "question": prompt,
+                            "chat_history": chat_history_formatted
+                        })
                         ai_response = response["answer"]
                         st.markdown(ai_response)
                         st.session_state.messages.append({"role": "assistant", "content": ai_response})
                     except Exception as e:
                         st.error(f"Error during retrieval: {e}")
-                        st.session_state.messages.append({"role": "assistant", "content": "I'm sorry, I encountered an error while trying to answer that."})
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": "I'm sorry, I encountered an error while trying to answer that."
+                        })
