@@ -1,9 +1,13 @@
 streamlit
 langchain
-langchain-groq
-langchain-community
-pypdf
-faiss-cpu  # Use faiss-cpu for broader compatibility
-python-dotenv
-requests
+faiss-cpu
 sentence-transformers
+python-dotenv
+pypdf
+requests
+urllib3
+tqdm
+huggingface-hub
+langchain-community
+langchain-core
+langchain-groq
