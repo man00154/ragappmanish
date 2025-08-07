@@ -11,17 +11,17 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from dotenv import load_dotenv
 from langchain_groq import ChatGroq
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# --- Configuration ---
+# --- Config ---
 PDF_DOWNLOAD_DIR = "downloaded_pdfs"
-os.makedirs(PDF_DOWNLOAD_DIR, exist_ok=True)
-
 CHROMA_DB_DIR = "chroma_db"
+os.makedirs(PDF_DOWNLOAD_DIR, exist_ok=True)
+os.makedirs(CHROMA_DB_DIR, exist_ok=True)
 
 # Predefined PDFs per company, with all your provided links included:
 PREDEFINED_PDF_LINKS = {
@@ -108,7 +108,7 @@ def initialize_vector_store(documents, embeddings):
     if documents:
         if 'vector_store' in st.session_state and st.session_state.vector_store is not None:
             st.session_state.vector_store.add_documents(documents)
-            st.info("Added new documents to existing vector store.")
+            st.info("Added to existing vector store.")
         else:
             st.session_state.vector_store = Chroma.from_documents(
                 documents=documents,
@@ -117,13 +117,13 @@ def initialize_vector_store(documents, embeddings):
             )
             st.info("Created new vector store.")
         st.session_state.vector_store.persist()
-        st.success("Vector store updated successfully!")
+        st.success("Vector store updated!")
     else:
-        st.warning("No documents to add to the vector store.")
+        st.warning("No documents to add.")
 
 def get_rag_chain(vector_store, llm):
     if vector_store is None:
-        st.error("Vector store is not initialized.")
+        st.error("Vector store not initialized.")
         return None
 
     if "chat_history" not in st.session_state:
@@ -155,8 +155,9 @@ def display_pdf(file_path):
 
 # --- Streamlit UI ---
 st.set_page_config(layout="wide", page_title="RAG App with Groq")
-st.title("📄MANISH SINGH- RAG Application with Document Chat (Groq)")
+st.title("📄 MANISH SINGH- RAG Application with Document Chat (Groq)")
 
+# Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "vector_store" not in st.session_state:
@@ -164,6 +165,7 @@ if "vector_store" not in st.session_state:
 if "pdf_display_path" not in st.session_state:
     st.session_state.pdf_display_path = None
 
+# Initialize models
 try:
     embeddings = get_embeddings()
     llm = get_llm()
@@ -175,12 +177,7 @@ except Exception as e:
 with st.sidebar:
     st.header("Upload & Ingest")
 
-    uploaded_files = st.file_uploader(
-        "Upload PDF files",
-        type="pdf",
-        accept_multiple_files=True
-    )
-
+    uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
     if uploaded_files and st.button("Process Uploaded PDFs"):
         all_new_docs = []
         for uploaded_file in uploaded_files:
@@ -194,9 +191,9 @@ with st.sidebar:
         if all_new_docs:
             initialize_vector_store(all_new_docs, embeddings)
 
-    st.subheader("Pre-fed Database")
+    st.subheader("Predefined PDF Ingestion")
     selected_company = st.selectbox("Select a company", [""] + list(PREDEFINED_PDF_LINKS.keys()))
-    if st.button("Ingest Pre-defined Documents"):
+    if st.button("Ingest Predefined PDFs"):
         if selected_company:
             all_docs = []
             for url in PREDEFINED_PDF_LINKS[selected_company]:
@@ -213,9 +210,8 @@ with st.sidebar:
             if all_docs:
                 initialize_vector_store(all_docs, embeddings)
 
-# Main UI
+# Layout
 col1, col2 = st.columns([0.6, 0.4])
-
 with col1:
     st.subheader("📑 PDF Viewer")
     if st.session_state.pdf_display_path:
