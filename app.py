@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_groq import ChatGroq
@@ -19,9 +19,8 @@ load_dotenv()
 
 # --- Config ---
 PDF_DOWNLOAD_DIR = "downloaded_pdfs"
-CHROMA_DB_DIR = "chroma_db"
+FAISS_INDEX_DIR = "faiss_index"
 os.makedirs(PDF_DOWNLOAD_DIR, exist_ok=True)
-os.makedirs(CHROMA_DB_DIR, exist_ok=True)
 
 # Predefined PDFs per company, with all your provided links included:
 PREDEFINED_PDF_LINKS = {
@@ -107,35 +106,28 @@ def get_llm():
 def initialize_vector_store(documents, embeddings):
     if documents:
         if 'vector_store' in st.session_state and st.session_state.vector_store is not None:
+            # Add new documents to existing store
             st.session_state.vector_store.add_documents(documents)
-            st.info("Added to existing vector store.")
+            st.info("Added new documents to existing FAISS index.")
         else:
-            st.session_state.vector_store = Chroma.from_documents(
-                documents=documents,
-                embedding=embeddings,
-                persist_directory=CHROMA_DB_DIR
-            )
-            st.info("Created new vector store.")
-        st.session_state.vector_store.persist()
-        st.success("Vector store updated!")
+            # Create a new FAISS vector store
+            st.session_state.vector_store = FAISS.from_documents(documents, embeddings)
+            st.info("Created new FAISS index.")
+        
+        # Save the updated or new FAISS index locally
+        st.session_state.vector_store.save_local(FAISS_INDEX_DIR)
+        st.success("Vector store updated and saved locally!")
     else:
         st.warning("No documents to add.")
 
+@st.cache_resource(experimental_allow_widgets=True)
 def get_rag_chain(vector_store, llm):
     if vector_store is None:
         st.error("Vector store not initialized.")
         return None
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
+    # This memory is created fresh for each Streamlit run, but the session_state messages will be used
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key='answer')
-
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            memory.chat_memory.add_user_message(msg["content"])
-        else:
-            memory.chat_memory.add_ai_message(msg["content"])
 
     return ConversationalRetrievalChain.from_llm(
         llm=llm,
@@ -155,7 +147,7 @@ def display_pdf(file_path):
 
 # --- Streamlit UI ---
 st.set_page_config(layout="wide", page_title="RAG App with Groq")
-st.title("📄 MANISH SINGH- RAG Application with Document Chat (Groq)")
+st.title("📄 MANISH SINGH - RAG Application with Document Chat (Groq, FAISS)")
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -164,6 +156,8 @@ if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 if "pdf_display_path" not in st.session_state:
     st.session_state.pdf_display_path = None
+if "rag_chain" not in st.session_state:
+    st.session_state.rag_chain = None
 
 # Initialize models
 try:
@@ -172,6 +166,14 @@ try:
 except Exception as e:
     st.error(f"Failed to initialize models. Error: {e}")
     st.stop()
+
+# Load existing FAISS index if it exists
+if os.path.exists(FAISS_INDEX_DIR):
+    try:
+        st.session_state.vector_store = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
+        st.success("Loaded existing FAISS index.")
+    except Exception as e:
+        st.warning(f"Could not load existing FAISS index. Starting fresh. Error: {e}")
 
 # Sidebar
 with st.sidebar:
@@ -190,6 +192,9 @@ with st.sidebar:
                 st.session_state.pdf_display_path = temp_file_path
         if all_new_docs:
             initialize_vector_store(all_new_docs, embeddings)
+            st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
+            st.session_state.messages = [] # Reset chat history
+            st.experimental_rerun()
 
     st.subheader("Predefined PDF Ingestion")
     selected_company = st.selectbox("Select a company", [""] + list(PREDEFINED_PDF_LINKS.keys()))
@@ -209,6 +214,13 @@ with st.sidebar:
                     st.warning(f"Skipping non-PDF: {url}")
             if all_docs:
                 initialize_vector_store(all_docs, embeddings)
+                st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
+                st.session_state.messages = [] # Reset chat history
+                st.experimental_rerun()
+
+# Re-initialize the RAG chain if the vector store is ready
+if st.session_state.vector_store and not st.session_state.rag_chain:
+    st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
 
 # Layout
 col1, col2 = st.columns([0.6, 0.4])
@@ -217,7 +229,7 @@ with col1:
     if st.session_state.pdf_display_path:
         display_pdf(st.session_state.pdf_display_path)
     else:
-        st.info("Upload or ingest a PDF.")
+        st.info("Upload or ingest a PDF to view it here.")
 
 with col2:
     st.subheader("💬 Chat with Documents")
@@ -228,18 +240,20 @@ with col2:
     if prompt := st.chat_input("Ask something about the document..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("assistant"):
-            if st.session_state.vector_store is None:
-                reply = "Please upload or ingest documents first."
+            if st.session_state.rag_chain is None:
+                reply = "Please upload or ingest documents first to enable chat."
                 st.markdown(reply)
                 st.session_state.messages.append({"role": "assistant", "content": reply})
             else:
                 with st.spinner("Thinking..."):
-                    qa_chain = get_rag_chain(st.session_state.vector_store, llm)
-                    if qa_chain:
-                        try:
-                            response = qa_chain({"question": prompt})
-                            ai_response = response["answer"]
-                            st.markdown(ai_response)
-                            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                    try:
+                        # Prepare chat history for the chain
+                        chat_history_formatted = [(m['role'], m['content']) for m in st.session_state.messages if m['role'] != 'assistant']
+                        response = st.session_state.rag_chain.invoke({"question": prompt, "chat_history": chat_history_formatted})
+                        
+                        ai_response = response["answer"]
+                        st.markdown(ai_response)
+                        st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                    except Exception as e:
+                        st.error(f"Error during retrieval: {e}")
+                        st.session_state.messages.append({"role": "assistant", "content": "I'm sorry, I encountered an error while trying to answer that."})
