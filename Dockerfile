@@ -1,28 +1,37 @@
-# Use an official Python runtime as a parent image
+# Use official Python image
 FROM python:3.10-slim
 
-# Set the working directory in the container
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies needed for some Python packages
+# Install OS dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    libffi-dev \
-    gcc \
+    git \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file into the working directory
-COPY requirements.txt .
-
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the application code into the container
+# Copy files
 COPY . .
 
-# Set the environment variable for Streamlit
-ENV STREAMLIT_SERVER_PORT=8501
+# Install Python dependencies
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
+
+# Expose Streamlit port
 EXPOSE 8501
 
-# Command to run the Streamlit app
+# Streamlit specific environment variables
+ENV STREAMLIT_SERVER_HEADLESS=true
+ENV STREAMLIT_SERVER_PORT=8501
+ENV STREAMLIT_SERVER_ENABLECORS=false
+
+# Run the app
 CMD ["streamlit", "run", "app.py"]
