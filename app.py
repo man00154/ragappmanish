@@ -187,7 +187,7 @@ with st.sidebar:
             initialize_vector_store(all_new_docs, embeddings)
             st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
             st.session_state.messages = []
-            st.experimental_rerun()
+            st.rerun()
 
     st.subheader("Predefined PDF Ingestion")
     selected_company = st.selectbox("Select a company", [""] + list(PREDEFINED_PDF_LINKS.keys()))
@@ -209,7 +209,7 @@ with st.sidebar:
                 initialize_vector_store(all_docs, embeddings)
                 st.session_state.rag_chain = get_rag_chain(st.session_state.vector_store, llm)
                 st.session_state.messages = []
-                st.experimental_rerun()
+                st.rerun()
 
 # Re-initialize RAG chain if needed
 if st.session_state.vector_store and not st.session_state.rag_chain:
